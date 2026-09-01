@@ -40,7 +40,7 @@ UA = (
 )
 HEADERS = {"User-Agent": UA, "Accept-Language": "zh-TW,zh;q=0.9"}
 
-SOLD_OUT_KEYWORDS = []
+SOLD_OUT_KEYWORDS = ["貨到通知我", "補貨通知", "已售完", "售完"]
 
 LINE_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_TO = os.environ.get("LINE_TO", "")
