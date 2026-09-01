@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-Hant" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Owala 補貨監測</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root, :root[data-theme="dark"]{
+    --bg:#0E1F26; --surface:#16303A; --text:#EAF0EF; --dim:#8AA5AE;
+    --water:#4FC3D9; --muted:#5E7C87; --amber:#E0A73C;
+    --rule:rgba(234,240,239,.14); --shadow:none;
+  }
+  :root[data-theme="light"]{
+    --bg:#F4F7F7; --surface:#FFFFFF; --text:#0E1F26; --dim:#5E7C87;
+    --water:#1B8FA8; --muted:#A9BCC2; --amber:#B57C14;
+    --rule:rgba(14,31,38,.12); --shadow:0 1px 2px rgba(14,31,38,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:"Noto Sans TC",system-ui,sans-serif;
+    font-size:16px; line-height:1.7; -webkit-font-smoothing:antialiased;
+    transition:background .25s ease,color .25s ease;
+  }
+  .wrap{max-width:56rem;margin:0 auto;padding:2.5rem 1.5rem 5rem}
+  h2{font-size:.875rem;font-weight:500;margin:0 0 .25rem}
+  .note{margin:0 0 1.25rem;color:var(--dim);font-size:.8125rem}
+  .mono{font-family:"Roboto Mono",monospace}
+
+  /* 頁首 */
+  .masthead{
+    display:flex;align-items:center;gap:1rem;
+    padding-bottom:1.25rem;border-bottom:1px solid var(--rule);
+  }
+  .masthead h1{font-size:.9375rem;font-weight:500;margin:0;flex:1}
+  .toggle{
+    background:none;border:1px solid var(--rule);color:var(--dim);
+    border-radius:999px;padding:.375rem .875rem;font:inherit;font-size:.8125rem;
+    cursor:pointer;white-space:nowrap;
+  }
+  .toggle:hover,.toggle:focus-visible{color:var(--water);border-color:var(--water)}
+
+  /* 商品 + 主狀態 */
+  .verdict{display:flex;gap:1.75rem;align-items:center;padding:3rem 0 2rem;flex-wrap:wrap}
+  .thumb{
+    width:9rem;height:9rem;flex:0 0 auto;border-radius:.5rem;
+    object-fit:cover;background:var(--surface);border:1px solid var(--rule);
+  }
+  .thumb[hidden]{display:none}
+  .verdict-text{flex:1 1 16rem;min-width:0}
+  .word{
+    font-size:clamp(4rem,16vw,7.5rem);font-weight:900;line-height:.9;
+    letter-spacing:-.03em;margin:0;color:var(--muted);transition:color .3s ease;
+  }
+  .in-stock .word{color:var(--water)}
+  .is-error .word{color:var(--amber)}
+  .price{margin:.75rem 0 0;font-size:1.375rem;font-weight:700}
+  .price small{font-size:.8125rem;font-weight:400;color:var(--dim);margin-left:.375rem}
+  .since{margin:.5rem 0 0;color:var(--dim);font-size:.9375rem}
+  .since b{color:var(--text);font-weight:500}
+
+  .pulse{display:inline-flex;align-items:center;gap:.5rem;color:var(--dim);font-size:.8125rem}
+  .pulse i{width:.5rem;height:.5rem;border-radius:50%;background:var(--water);animation:beat 2.4s ease-in-out infinite}
+  @keyframes beat{0%,100%{opacity:1}50%{opacity:.25}}
+  @media (prefers-reduced-motion:reduce){.pulse i{animation:none}}
+
+  /* 統計 */
+  .stats{
+    display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));
+    gap:1px;background:var(--rule);border:1px solid var(--rule);
+    border-radius:.5rem;overflow:hidden;margin-top:2rem;box-shadow:var(--shadow);
+  }
+  .stat{background:var(--bg);padding:1.125rem 1.25rem}
+  .stat .n{font-size:1.75rem;font-weight:700;line-height:1.2;letter-spacing:-.02em}
+  .stat .n span{font-size:.9375rem;font-weight:400;color:var(--dim);margin-left:.25rem}
+  .stat .k{font-size:.8125rem;color:var(--dim)}
+
+  section{margin-top:3rem;padding-top:2rem;border-top:1px solid var(--rule)}
+  .chart-box{position:relative;height:15rem}
+
+  /* 監測帶 */
+  .tape{display:flex;gap:2px;height:4rem;overflow-x:auto;direction:rtl;padding-bottom:.5rem}
+  .tape span{flex:0 0 5px;border-radius:1px;background:var(--muted);opacity:.55}
+  .tape span.in-stock{background:var(--water);opacity:1}
+  .tape span.error{background:var(--amber);opacity:.8}
+  .axis{display:flex;justify-content:space-between;color:var(--dim);font-size:.6875rem;margin-top:.25rem}
+
+  /* 變化紀錄 */
+  ol{list-style:none;margin:0;padding:0}
+  ol li{display:flex;gap:1rem;align-items:baseline;padding:.625rem 0;border-bottom:1px solid var(--rule)}
+  ol time{font-size:.8125rem;color:var(--dim);flex:0 0 auto}
+  .lbl-in{color:var(--water)}
+  .lbl-out{color:var(--dim)}
+  .empty{color:var(--dim);font-size:.875rem}
+  footer{margin-top:3rem;color:var(--dim);font-size:.75rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="masthead">
+    <h1 id="title">Owala Sway 30oz 高爾夫球款</h1>
+    <a class="toggle" id="shop-link" href="https://www.finders.com.tw/products/owala-sway-30oz-golf">商品頁</a>
+    <button class="toggle" id="theme-btn" type="button">淺色</button>
+  </div>
+
+  <div class="verdict" id="verdict">
+    <img class="thumb" id="thumb" alt="" hidden>
+    <div class="verdict-text">
+      <p class="word" id="word">讀取中</p>
+      <p class="price" id="price" hidden></p>
+      <p class="since" id="since">正在載入監測資料。</p>
+    </div>
+  </div>
+
+  <div class="pulse"><i></i><span id="pulse-text">每 10 分鐘自動檢查一次</span></div>
+
+  <div class="stats" id="stats"></div>
+
+  <section>
+    <h2>近 24 小時分布</h2>
+    <p class="note">每小時的檢查次數，亮色是有貨的部分。</p>
+    <div class="chart-box"><canvas id="chart"></canvas></div>
+  </section>
+
+  <section>
+    <h2>監測帶</h2>
+    <p class="note">每一條代表一次檢查，最新的在右邊。</p>
+    <div class="tape" id="tape"></div>
+    <div class="axis"><span class="mono" id="axis-new">最新</span><span class="mono" id="axis-old">較早</span></div>
+  </section>
+
+  <section>
+    <h2>狀態變化</h2>
+    <ol id="log-list"><li class="empty">尚無紀錄</li></ol>
+  </section>
+
+  <footer>資料來源：GitHub Actions 排程檢查，結果寫入 data/stock_status.json。</footer>
+</div>
+
+<script>
+const LABEL = { in_stock:"有貨", sold_out:"售完", error:"檢查失敗", unknown:"尚未檢查" };
+let chart = null, cached = null;
+
+/* ---------- 主題 ---------- */
+const root = document.documentElement;
+const btn = document.getElementById("theme-btn");
+
+function applyTheme(t){
+  root.setAttribute("data-theme", t);
+  btn.textContent = t === "dark" ? "淺色" : "深色";
+  try { localStorage.setItem("theme", t); } catch(e){}
+  if (cached) drawChart(cached);
+}
+let saved = null;
+try { saved = localStorage.getItem("theme"); } catch(e){}
+applyTheme(saved || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark"));
+btn.onclick = () => applyTheme(root.getAttribute("data-theme") === "dark" ? "light" : "dark");
+
+/* ---------- 工具 ---------- */
+const pad = n => String(n).padStart(2,"0");
+
+function fmt(iso){
+  if(!iso) return "—";
+  const d = new Date(iso);
+  return `${d.getMonth()+1}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function dur(ms){
+  const m = Math.round(ms/60000);
+  if (m < 1) return "不到 1 分鐘";
+  if (m < 60) return `${m} 分鐘`;
+  const h = Math.floor(m/60);
+  if (h < 24) return `${h} 小時 ${m%60} 分`;
+  return `${Math.floor(h/24)} 天 ${h%24} 小時`;
+}
+
+function ago(iso){
+  return iso ? dur(Date.now() - new Date(iso)) + "前" : "—";
+}
+
+const cssVar = n => getComputedStyle(root).getPropertyValue(n).trim();
+
+/* ---------- 圖表 ---------- */
+function drawChart(data){
+  const history = data.history || [];
+  const now = new Date();
+  const buckets = [];
+  for (let i = 23; i >= 0; i--){
+    const t = new Date(now.getTime() - i*3600000);
+    buckets.push({ label: pad(t.getHours()) + ":00",
+                   key: `${t.getFullYear()}-${t.getMonth()}-${t.getDate()}-${t.getHours()}`,
+                   ok: 0, out: 0 });
+  }
+  const index = Object.fromEntries(buckets.map(b => [b.key, b]));
+  history.forEach(h => {
+    const d = new Date(h.time);
+    const b = index[`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${d.getHours()}`];
+    if (!b) return;
+    if (h.status === "in_stock") b.ok++; else b.out++;
+  });
+
+  if (chart) chart.destroy();
+  chart = new Chart(document.getElementById("chart"), {
+    type: "bar",
+    data: {
+      labels: buckets.map(b => b.label),
+      datasets: [
+        { label:"有貨", data:buckets.map(b=>b.ok),  backgroundColor:cssVar("--water"), stack:"s", borderRadius:2 },
+        { label:"售完", data:buckets.map(b=>b.out), backgroundColor:cssVar("--muted"), stack:"s", borderRadius:2 }
+      ]
+    },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ labels:{ color:cssVar("--dim"), boxWidth:12, font:{size:12} } } },
+      scales:{
+        x:{ stacked:true, grid:{display:false},
+            ticks:{ color:cssVar("--dim"), maxRotation:0, autoSkip:true, maxTicksLimit:8, font:{size:11} } },
+        y:{ stacked:true, beginAtZero:true,
+            grid:{ color:cssVar("--rule") },
+            ticks:{ color:cssVar("--dim"), precision:0, font:{size:11} } }
+      }
+    }
+  });
+}
+
+/* ---------- 主渲染 ---------- */
+function render(data){
+  cached = data;
+  const status = data.current_status || "unknown";
+  const history = data.history || [];
+  const stats = data.stats || {};
+  const p = data.product || {};
+
+  if (data.product_url) document.getElementById("shop-link").href = data.product_url;
+  if (p.title) document.getElementById("title").textContent = p.title;
+  if (p.image){
+    const t = document.getElementById("thumb");
+    t.src = p.image; t.alt = p.title || "商品縮圖"; t.hidden = false;
+  }
+  if (p.price){
+    const el = document.getElementById("price");
+    el.innerHTML = `NT$ ${Number(p.price).toLocaleString()}<small>${p.currency || "TWD"}</small>`;
+    el.hidden = false;
+  }
+
+  const v = document.getElementById("verdict");
+  v.className = "verdict" + (status === "in_stock" ? " in-stock" : status === "error" ? " is-error" : "");
+  document.getElementById("word").textContent = LABEL[status] || LABEL.unknown;
+
+  const since = stats.status_since;
+  const sinceEl = document.getElementById("since");
+  if (status === "unknown"){
+    sinceEl.textContent = "還沒有任何檢查紀錄，等第一次排程跑完就會出現。";
+  } else {
+    sinceEl.innerHTML = `${LABEL[status]}狀態已持續 <b>${since ? dur(Date.now()-new Date(since)) : "—"}</b>，最後檢查於 <b>${ago(data.last_checked)}</b>。`;
+  }
+
+  if (data.last_checked && Date.now() - new Date(data.last_checked) > 45*60*1000){
+    document.getElementById("pulse-text").textContent = `排程似乎停了，最後一次檢查是 ${ago(data.last_checked)}`;
+  }
+
+  /* 統計 */
+  const today = new Date().toDateString();
+  const todayCount = history.filter(h => new Date(h.time).toDateString() === today).length;
+  const start = stats.last_in_stock_start, end = stats.last_in_stock_end;
+  let lastStock = "從未";
+  if (start){
+    lastStock = fmt(start);
+  }
+  let lastLen = "—";
+  if (start) lastLen = dur((end ? new Date(end) : new Date()) - new Date(start)) + (end ? "" : "（進行中）");
+
+  document.getElementById("stats").innerHTML = [
+    [todayCount, "次", "今日檢查次數"],
+    [since ? dur(Date.now()-new Date(since)) : "—", "", `${LABEL[status]}已持續`],
+    [stats.in_stock_events || 0, "次", "累計補貨次數"],
+    [lastStock, "", "上次有貨時間"],
+    [lastLen, "", "上次有貨持續"],
+    [stats.total_checks || 0, "次", "累計檢查次數"]
+  ].map(([n,u,k]) => `<div class="stat"><div class="n">${n}${u?`<span>${u}</span>`:""}</div><div class="k">${k}</div></div>`).join("");
+
+  drawChart(data);
+
+  /* 監測帶 */
+  const tape = document.getElementById("tape");
+  tape.innerHTML = "";
+  history.slice(0, 288).forEach(h => {
+    const bar = document.createElement("span");
+    bar.className = h.status === "in_stock" ? "in-stock" : h.status === "error" ? "error" : "";
+    bar.title = `${fmt(h.time)}　${LABEL[h.status] || h.status}`;
+    tape.appendChild(bar);
+  });
+  if (history.length){
+    document.getElementById("axis-new").textContent = fmt(history[0].time);
+    document.getElementById("axis-old").textContent = fmt(history[Math.min(287, history.length-1)].time);
+  }
+
+  /* 狀態變化 */
+  const list = document.getElementById("log-list");
+  const changes = [];
+  for (let i = 0; i < history.length; i++){
+    const cur = history[i];
+    if (cur.status === "error") continue;
+    const nextReal = history.slice(i+1).find(h => h.status !== "error");
+    if (!nextReal || nextReal.status !== cur.status) changes.push(cur);
+    if (changes.length >= 20) break;
+  }
+  list.innerHTML = changes.length
+    ? changes.map(c => `<li><time class="mono">${fmt(c.time)}</time><span class="${c.status==="in_stock"?"lbl-in":"lbl-out"}">${LABEL[c.status]}</span></li>`).join("")
+    : '<li class="empty">還沒有狀態變化</li>';
+}
+
+fetch("data/stock_status.json?t=" + Date.now())
+  .then(r => { if(!r.ok) throw new Error(r.status); return r.json(); })
+  .then(render)
+  .catch(() => {
+    document.getElementById("word").textContent = "讀不到資料";
+    document.getElementById("since").textContent =
+      "找不到 data/stock_status.json。確認 GitHub Pages 的來源分支正確，且檔案已經 commit。";
+  });
+</script>
+</body>
+</html>
