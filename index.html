@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Owala 補貨監測</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;900&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#0E1F26;
+    --ink-soft:#16303A;
+    --paper:#EAF0EF;
+    --dim:#7C97A0;
+    --water:#4FC3D9;
+    --muted:#456570;
+    --amber:#E0A73C;
+    --rule:rgba(234,240,239,.14);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--ink);
+    color:var(--paper);
+    font-family:"Noto Sans TC",system-ui,sans-serif;
+    font-size:16px;
+    line-height:1.7;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:52rem;margin:0 auto;padding:3rem 1.5rem 5rem}
+
+  /* 頁首 */
+  .masthead{
+    display:flex;align-items:baseline;gap:.75rem;flex-wrap:wrap;
+    padding-bottom:1.25rem;border-bottom:1px solid var(--rule);
+  }
+  .masthead h1{font-size:1rem;font-weight:500;margin:0;letter-spacing:.02em}
+  .masthead a{color:var(--dim);font-size:.8125rem;text-decoration:none;border-bottom:1px solid var(--rule)}
+  .masthead a:hover,.masthead a:focus-visible{color:var(--water);border-color:var(--water)}
+
+  /* 主狀態 */
+  .verdict{padding:3.5rem 0 2.5rem}
+  .verdict .word{
+    font-size:clamp(4.5rem,20vw,9rem);
+    font-weight:900;line-height:.9;letter-spacing:-.03em;
+    margin:0;color:var(--muted);
+    transition:color .3s ease;
+  }
+  .verdict.in-stock .word{color:var(--water)}
+  .verdict.error .word{color:var(--amber)}
+  .verdict .since{margin:1.25rem 0 0;color:var(--dim);font-size:.9375rem;max-width:32rem}
+  .verdict .since b{color:var(--paper);font-weight:500}
+
+  /* 監測狀態列 */
+  .pulse{display:inline-flex;align-items:center;gap:.5rem;color:var(--dim);font-size:.8125rem}
+  .pulse i{
+    width:.5rem;height:.5rem;border-radius:50%;background:var(--water);
+    animation:beat 2.4s ease-in-out infinite;
+  }
+  @keyframes beat{0%,100%{opacity:1}50%{opacity:.25}}
+  @media (prefers-reduced-motion:reduce){.pulse i{animation:none}}
+
+  /* 監測帶 */
+  .tape-block{margin-top:1rem;padding-top:2rem;border-top:1px solid var(--rule)}
+  .tape-block h2{font-size:.875rem;font-weight:500;margin:0 0 .25rem;color:var(--paper)}
+  .tape-block p{margin:0 0 1.25rem;color:var(--dim);font-size:.8125rem}
+  .tape{
+    display:flex;gap:2px;align-items:stretch;height:4.5rem;
+    overflow-x:auto;direction:rtl;padding-bottom:.5rem;
+  }
+  .tape span{flex:0 0 5px;border-radius:1px;background:var(--muted);opacity:.55}
+  .tape span.in-stock{background:var(--water);opacity:1}
+  .tape span.error{background:var(--amber);opacity:.8}
+  .tape-axis{
+    display:flex;justify-content:space-between;
+    color:var(--dim);font-family:"Roboto Mono",monospace;font-size:.6875rem;
+    margin-top:.25rem;
+  }
+
+  /* 變化紀錄 */
+  .log{margin-top:3rem;padding-top:2rem;border-top:1px solid var(--rule)}
+  .log h2{font-size:.875rem;font-weight:500;margin:0 0 1.25rem}
+  .log ol{list-style:none;margin:0;padding:0}
+  .log li{
+    display:flex;gap:1rem;align-items:baseline;
+    padding:.625rem 0;border-bottom:1px solid var(--rule);
+  }
+  .log time{
+    font-family:"Roboto Mono",monospace;font-size:.8125rem;color:var(--dim);
+    flex:0 0 auto;
+  }
+  .log .label{font-size:.9375rem}
+  .log .in-stock{color:var(--water)}
+  .log .sold-out{color:var(--dim)}
+  .empty{color:var(--dim);font-size:.875rem}
+
+  footer{margin-top:3rem;color:var(--dim);font-size:.75rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="masthead">
+    <h1>Owala Sway 30oz 高爾夫球款</h1>
+    <a id="shop-link" href="https://www.finders.com.tw/products/owala-sway-30oz-golf">商品頁</a>
+  </div>
+
+  <section class="verdict" id="verdict">
+    <p class="word" id="word">讀取中</p>
+    <p class="since" id="since">正在載入監測資料。</p>
+  </section>
+
+  <div class="pulse"><i></i><span id="pulse-text">每 10 分鐘自動檢查一次</span></div>
+
+  <section class="tape-block">
+    <h2>監測帶</h2>
+    <p>每一條代表一次檢查，最新的在右邊。亮色是有貨。</p>
+    <div class="tape" id="tape"></div>
+    <div class="tape-axis"><span id="axis-new">最新</span><span id="axis-old">較早</span></div>
+  </section>
+
+  <section class="log">
+    <h2>狀態變化</h2>
+    <ol id="log-list"><li class="empty">尚無紀錄</li></ol>
+  </section>
+
+  <footer>資料來源：GitHub Actions 排程檢查，結果寫入 data/stock_status.json。</footer>
+</div>
+
+<script>
+const LABEL = { in_stock: "有貨", sold_out: "售完", error: "檢查失敗", unknown: "尚未檢查" };
+
+function fmt(iso){
+  if(!iso) return "—";
+  const d = new Date(iso);
+  const p = n => String(n).padStart(2,"0");
+  return `${d.getMonth()+1}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function ago(iso){
+  if(!iso) return "";
+  const mins = Math.round((Date.now() - new Date(iso)) / 60000);
+  if (mins < 1) return "剛剛";
+  if (mins < 60) return `${mins} 分鐘前`;
+  const hrs = Math.round(mins/60);
+  if (hrs < 48) return `${hrs} 小時前`;
+  return `${Math.round(hrs/24)} 天前`;
+}
+
+function render(data){
+  const status = data.current_status || "unknown";
+  const history = data.history || [];
+
+  if (data.product_url) document.getElementById("shop-link").href = data.product_url;
+
+  // 主狀態
+  const verdict = document.getElementById("verdict");
+  verdict.className = "verdict" + (status === "in_stock" ? " in-stock" : status === "error" ? " error" : "");
+  document.getElementById("word").textContent = LABEL[status] || LABEL.unknown;
+
+  // 這個狀態持續多久
+  let streak = 0;
+  for (const h of history){
+    if (h.status === "error") continue;
+    if (h.status === status) streak++; else break;
+  }
+  const oldest = history[Math.min(streak, history.length) - 1];
+  const sinceEl = document.getElementById("since");
+  if (status === "unknown"){
+    sinceEl.textContent = "還沒有任何檢查紀錄，等第一次排程跑完就會出現。";
+  } else if (status === "in_stock"){
+    sinceEl.innerHTML = `自 <b>${fmt(oldest && oldest.time)}</b> 起就有貨，最後檢查於 <b>${ago(data.last_checked)}</b>。`;
+  } else {
+    sinceEl.innerHTML = `已售完 <b>${streak}</b> 次檢查，最後檢查於 <b>${ago(data.last_checked)}</b>。`;
+  }
+
+  // 檢查資料是否過期（超過 45 分鐘沒更新代表排程可能停了）
+  if (data.last_checked && Date.now() - new Date(data.last_checked) > 45*60*1000){
+    document.getElementById("pulse-text").textContent =
+      `排程似乎停了，最後一次檢查是 ${ago(data.last_checked)}`;
+  }
+
+  // 監測帶（direction:rtl，所以陣列順序即為新到舊）
+  const tape = document.getElementById("tape");
+  tape.innerHTML = "";
+  history.slice(0, 288).forEach(h => {
+    const bar = document.createElement("span");
+    bar.className = h.status === "in_stock" ? "in-stock" : h.status === "error" ? "error" : "";
+    bar.title = `${fmt(h.time)}　${LABEL[h.status] || h.status}`;
+    tape.appendChild(bar);
+  });
+  if (history.length){
+    document.getElementById("axis-new").textContent = fmt(history[0].time);
+    document.getElementById("axis-old").textContent = fmt(history[Math.min(287, history.length-1)].time);
+  }
+
+  // 只列出狀態改變的那幾筆，而不是每一次檢查
+  const list = document.getElementById("log-list");
+  const changes = [];
+  for (let i = 0; i < history.length; i++){
+    const cur = history[i];
+    if (cur.status === "error") continue;
+    const nextReal = history.slice(i+1).find(h => h.status !== "error");
+    if (!nextReal || nextReal.status !== cur.status) changes.push(cur);
+    if (changes.length >= 20) break;
+  }
+  if (!changes.length){
+    list.innerHTML = '<li class="empty">還沒有狀態變化</li>';
+  } else {
+    list.innerHTML = changes.map(c =>
+      `<li><time>${fmt(c.time)}</time><span class="label ${c.status === "in_stock" ? "in-stock" : "sold-out"}">${LABEL[c.status]}</span></li>`
+    ).join("");
+  }
+}
+
+fetch("data/stock_status.json?t=" + Date.now())
+  .then(r => { if(!r.ok) throw new Error(r.status); return r.json(); })
+  .then(render)
+  .catch(err => {
+    document.getElementById("word").textContent = "讀不到資料";
+    document.getElementById("since").textContent =
+      "找不到 data/stock_status.json。確認 GitHub Pages 的來源分支正確，且檔案已經 commit。";
+  });
+</script>
+</body>
+</html>
