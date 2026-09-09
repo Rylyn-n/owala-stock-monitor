@@ -1,10 +1,14 @@
 {
   "current_status": "sold_out",
-  "last_checked": "2026-09-09T14:39:22+08:00",
+  "last_checked": "2026-09-09T19:52:03+08:00",
   "alerted": false,
   "consecutive_errors": 0,
   "product_url": "https://www.finders.com.tw/products/owala-sway-30oz-golf",
   "history": [
+    {
+      "time": "2026-09-09T19:52:03+08:00",
+      "status": "sold_out"
+    },
     {
       "time": "2026-09-09T14:39:22+08:00",
       "status": "sold_out"
@@ -244,12 +248,12 @@
   ],
   "product": {
     "title": "Owala® FreeSip Sway 【高爾夫球】特別款",
-    "image": "https://img.shoplineapp.com/media/image_clips/6a5f166b9d3a01e280685cec/original.jpg?1784616555=&amp;owner_id=620b0e6bf267390031086ddc",
+    "image": "https://img.shoplineapp.com/media/image_clips/6aa1189ae48530d487ab8e35/original.jpg?1788942489=&amp;owner_id=620b0e6bf267390031086ddc",
     "price": 1450,
     "currency": "TWD"
   },
   "stats": {
-    "total_checks": 56,
+    "total_checks": 57,
     "in_stock_checks": 0,
     "in_stock_events": 0,
     "status_since": "2026-09-02T03:45:24+08:00",
