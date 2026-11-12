@@ -11,9 +11,11 @@ Owala 水壺庫存監控 —— GitHub Actions 版本
   4. 更新累計統計（總檢查次數、有貨次數、上次有貨區間）
   5. 把結果寫回 data/stock_status.json，由 workflow commit 回 repo
 
-偵測策略（由準到粗，前一層失敗才往下走）：
-  第 1 層：SHOPLINE 內部 JSON API，直接讀 variant 的庫存欄位
-  第 2 層：HTML 關鍵字 —— 「貨到通知我」出現 = 售完
+偵測策略（前一層失敗才往下走），每個款式分開判斷，任一款有貨就算有貨：
+  第 1 層：頁面內嵌的 SHOPLINE 商品 JSON（app.value('product', JSON.parse(...))）
+  第 2 層：JSON-LD 的 offers.availability
+  第 3 層：SHOPLINE /api/product/products.json
+  都抓不到 → 記為 error（不再用「貨到通知我」關鍵字，因為它是模板固定文字）
 """
 
 import os
@@ -40,8 +42,6 @@ UA = (
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
 HEADERS = {"User-Agent": UA, "Accept-Language": "zh-TW,zh;q=0.9"}
-
-SOLD_OUT_KEYWORDS = ["貨到通知我", "補貨通知", "已售完", "售完"]
 
 LINE_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_TO = os.environ.get("LINE_TO", "")
@@ -118,73 +118,231 @@ def extract_product(html):
     return info
 
 
-# ---------------------------------------------------------- 第 1 層：API
+# ------------------------------------------------------ 款式（variation）解析
+#
+# 商品現在有多個款式（例如 4 個顏色），只要「其中任一個」有貨就算有貨。
+# 每個款式各自判斷，結果存成 [{"name": ..., "in_stock": True/False}, ...]
+
+LANG_KEYS = ["zh-hant", "zh-TW", "zh_tw", "zh", "en"]
+
+# 只想盯特定款式時，在 workflow 設 WATCH_VARIANTS="關鍵字1,關鍵字2"；留空 = 全部款式
+WATCH_VARIANTS = [k.strip() for k in os.environ.get("WATCH_VARIANTS", "").split(",") if k.strip()]
+
+
+def pick_translation(t):
+    if isinstance(t, str):
+        return t
+    if isinstance(t, dict):
+        for k in LANG_KEYS:
+            if t.get(k):
+                return t[k]
+        for v in t.values():
+            if isinstance(v, str) and v:
+                return v
+    return None
+
+
+def variant_name(v, idx):
+    parts = []
+    ft = v.get("fields_translations")
+    if isinstance(ft, dict):
+        names = None
+        for k in LANG_KEYS:
+            if isinstance(ft.get(k), list):
+                names = ft[k]
+                break
+        if names is None:
+            names = next((x for x in ft.values() if isinstance(x, list)), [])
+        parts = [str(n) for n in names if n]
+    if not parts and isinstance(v.get("fields"), list):
+        for f in v["fields"]:
+            if isinstance(f, dict):
+                n = pick_translation(f.get("name_translations")) or f.get("name")
+                if n:
+                    parts.append(str(n))
+    if not parts:
+        n = pick_translation(v.get("title_translations")) or v.get("title") or v.get("name")
+        if n:
+            parts.append(str(n))
+    return " / ".join(parts) or v.get("sku") or f"款式 {idx + 1}"
+
+
+def variant_in_stock(v):
+    """True/False；看不到任何庫存欄位回傳 None。"""
+    if v.get("unlimited_quantity") is True:
+        return True
+    if v.get("out_of_stock_orderable") is True:      # 允許缺貨下單（預購）
+        return True
+    for key in ("total_orderable_quantity", "quantity", "stock", "inventory_quantity"):
+        q = v.get(key)
+        if isinstance(q, (int, float)):
+            return q > 0
+    if isinstance(v.get("available"), bool):
+        return v["available"]
+    if isinstance(v.get("sold_out"), bool):
+        return not v["sold_out"]
+    return None
+
+
+def variants_from_product(p):
+    """從 SHOPLINE 商品物件取出每個款式的庫存。抓不到回傳 None。"""
+    if not isinstance(p, dict):
+        return None
+    raw = p.get("variations") or p.get("variants") or []
+    out = []
+    for i, v in enumerate(raw):
+        if not isinstance(v, dict):
+            continue
+        s = variant_in_stock(v)
+        if s is not None:
+            out.append({"name": variant_name(v, i), "in_stock": s})
+    if out:
+        return out
+    # 沒有款式的單一商品：直接看商品本身
+    s = variant_in_stock(p)
+    if s is not None:
+        name = pick_translation(p.get("title_translations")) or p.get("title") or "商品"
+        return [{"name": str(name), "in_stock": s}]
+    return None
+
+
+def find_products(obj, depth=0):
+    """在任意 JSON 裡找出看起來像商品（含 variations）的物件。"""
+    if depth > 6:
+        return
+    if isinstance(obj, dict):
+        if isinstance(obj.get("variations"), list) or isinstance(obj.get("variants"), list):
+            yield obj
+        for v in obj.values():
+            yield from find_products(v, depth + 1)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from find_products(v, depth + 1)
+
+
+# ---------------------------------------------------------- 第 1 層：頁面內嵌 JSON
+
+JS_PARSE_RE = re.compile(r"JSON\.parse\(\s*'((?:\\.|[^'\\])*)'\s*\)", re.S)
+JS_PARSE_RE2 = re.compile(r'JSON\.parse\(\s*"((?:\\.|[^"\\])*)"\s*\)', re.S)
+
+
+def unescape_js(s):
+    s = s.replace("\\'", "'")
+    try:
+        return json.loads('"' + s.replace('"', '\\"').replace('\\\\"', '\\"') + '"')
+    except Exception:
+        try:
+            return s.encode("utf-8").decode("unicode_escape").encode("latin-1").decode("utf-8")
+        except Exception:
+            return None
+
+
+def check_via_embedded(html):
+    """SHOPLINE 會把商品資料用 app.value('product', JSON.parse('...')) 塞在頁面裡。"""
+    if not html:
+        return None
+    candidates = []
+    for rx in (JS_PARSE_RE, JS_PARSE_RE2):
+        for m in rx.finditer(html):
+            body = m.group(1)
+            if "variation" not in body and "quantity" not in body:
+                continue
+            text = unescape_js(body)
+            if not text:
+                continue
+            try:
+                candidates.append(json.loads(text))
+            except Exception:
+                continue
+    # 也試 <script type="application/json"> 之類的資料區塊
+    for m in re.finditer(r'<script[^>]+type=["\']application/json["\'][^>]*>(.*?)</script>', html, re.S):
+        try:
+            candidates.append(json.loads(m.group(1)))
+        except Exception:
+            pass
+
+    for c in candidates:
+        for p in find_products(c):
+            vs = variants_from_product(p)
+            if vs:
+                log(f"頁面內嵌資料找到 {len(vs)} 個款式")
+                return vs
+    log("頁面內嵌資料找不到款式庫存")
+    return None
+
+
+# ---------------------------------------------------------- 第 2 層：JSON-LD
+
+def check_via_jsonld(html):
+    """schema.org 的 offers.availability，每個款式一個 offer。"""
+    if not html:
+        return None
+    out = []
+    for m in re.finditer(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', html, re.S):
+        try:
+            data = json.loads(m.group(1))
+        except Exception:
+            continue
+        items = data if isinstance(data, list) else [data]
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            offers = it.get("offers")
+            if isinstance(offers, dict):
+                offers = offers.get("offers") or [offers]
+            if not isinstance(offers, list):
+                continue
+            for i, o in enumerate(offers):
+                if not isinstance(o, dict) or "availability" not in o:
+                    continue
+                av = str(o["availability"])
+                name = o.get("name") or o.get("sku") or it.get("name") or f"款式 {i + 1}"
+                out.append({"name": str(name),
+                            "in_stock": ("InStock" in av or "PreOrder" in av or "LimitedAvailability" in av)})
+    if out:
+        log(f"JSON-LD 找到 {len(out)} 個款式")
+        return out
+    return None
+
+
+# ---------------------------------------------------------- 第 3 層：API
 
 def check_via_api(url):
-    """
-    SHOPLINE 站台通常有 /api/product/products.json?handle=xxx 這個端點。
-    回傳 True(有貨) / False(售完) / None(這層判斷不出來)
-    """
     m = re.match(r"(https?://[^/]+)/products/([^/?#]+)", url)
     if not m:
         return None
     base, handle = m.group(1), m.group(2)
     api = f"{base}/api/product/products.json?handle={handle}"
-
     try:
         r = requests.get(api, headers=HEADERS, timeout=REQUEST_TIMEOUT)
         if r.status_code != 200:
-            log(f"API 回應 {r.status_code}，改用關鍵字判斷")
+            log(f"API 回應 {r.status_code}")
             return None
         data = r.json()
     except Exception as e:
-        log(f"API 讀取失敗（{type(e).__name__}），改用關鍵字判斷")
+        log(f"API 讀取失敗（{type(e).__name__}）")
         return None
+    for p in find_products(data):
+        vs = variants_from_product(p)
+        if vs:
+            log(f"API 找到 {len(vs)} 個款式")
+            return vs
+    log("API 有回應但看不到款式庫存")
+    return None
 
-    items = data.get("items") or data.get("data") or data
-    if isinstance(items, dict):
-        items = [items]
-    if not isinstance(items, list):
-        return None
 
-    variants = []
-    for it in items:
-        if isinstance(it, dict):
-            variants.extend(it.get("variations") or it.get("variants") or [it])
-
-    available = None
+def summarize(variants):
+    """套用 WATCH_VARIANTS 篩選，回傳 (是否有貨, 有貨款式名稱清單)。"""
+    watched = variants
+    if WATCH_VARIANTS:
+        watched = [v for v in variants if any(k in v["name"] for k in WATCH_VARIANTS)]
+        if not watched:
+            log(f"WATCH_VARIANTS={WATCH_VARIANTS} 沒對到任何款式，改看全部")
+            watched = variants
     for v in variants:
-        if not isinstance(v, dict):
-            continue
-        if v.get("out_of_stock_orderable") is True:
-            available = True
-        elif isinstance(v.get("available"), bool):
-            available = available or v["available"]
-        elif isinstance(v.get("quantity"), (int, float)):
-            available = available or v["quantity"] > 0
-        elif isinstance(v.get("stock"), (int, float)):
-            available = available or v["stock"] > 0
-
-    if available is None:
-        log("API 有回應但看不到庫存欄位，改用關鍵字判斷")
-        return None
-
-    log(f"API 判斷結果：{'有貨' if available else '售完'}")
-    return bool(available)
-
-
-# ------------------------------------------------------ 第 2 層：關鍵字
-
-def check_via_html(html):
-    hits = [k for k in SOLD_OUT_KEYWORDS if k in html]
-    if hits:
-        log(f"HTML 出現售完訊號：{', '.join(hits)}")
-        return False
-    if "加入購物車" in html:
-        log("HTML 只找到「加入購物車」，判定有貨")
-        return True
-    log("HTML 找不到任何庫存訊號，保守判定為售完")
-    return False
+        log(f"  {'✓ 有貨' if v['in_stock'] else '✗ 售完'}  {v['name']}")
+    names = [v["name"] for v in watched if v["in_stock"]]
+    return bool(names), names
 
 
 # ---------------------------------------------------------------- LINE
@@ -248,6 +406,7 @@ DEFAULT_STATE = {
     "consecutive_errors": 0,
     "product_url": PRODUCT_URL,
     "product": {},
+    "variants": [],
     "stats": {
         "total_checks": 0,
         "in_stock_checks": 0,
@@ -290,13 +449,18 @@ def main():
     stats = state["stats"]
 
     html = fetch_html(PRODUCT_URL)
+    variants = None
+    in_stock_names = []
 
     try:
-        result = check_via_api(PRODUCT_URL)
-        if result is None:
-            if html is None:
-                raise RuntimeError("API 與頁面都讀取失敗")
-            result = check_via_html(html)
+        variants = (check_via_embedded(html)
+                    or check_via_jsonld(html)
+                    or check_via_api(PRODUCT_URL))
+        if variants is None:
+            # 注意：「貨到通知我」「售完」這些字是 SHOPLINE 頁面模板裡固定就有的，
+            # 不論有沒有貨都會出現，所以不能拿來判斷，直接當成錯誤處理。
+            raise RuntimeError("找不到任何款式庫存資料，可能是頁面結構改了")
+        result, in_stock_names = summarize(variants)
         status = "in_stock" if result else "sold_out"
         state["consecutive_errors"] = 0
     except Exception as e:
@@ -305,6 +469,9 @@ def main():
         state["consecutive_errors"] = state.get("consecutive_errors", 0) + 1
         if state["consecutive_errors"] == 6:
             send_line("庫存監控連續失敗多次，可能是頁面結構改了或被擋，請確認。")
+
+    if variants:
+        state["variants"] = variants
 
     log(f"上次：{prev} → 這次：{status}")
     ts = now_iso()
@@ -316,7 +483,8 @@ def main():
 
     # 通知：只在「售完 → 有貨」的轉折發一次
     if status == "in_stock" and not state.get("alerted", False):
-        if send_line("Owala Sway 30oz 高爾夫球款現在有貨了，手刀去結帳。"):
+        msg = "Owala Sway 30oz 高爾夫球款有貨了：" + "、".join(in_stock_names)
+        if send_line(msg):
             state["alerted"] = True
     elif status == "sold_out":
         state["alerted"] = False
