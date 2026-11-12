@@ -1,10 +1,14 @@
 {
   "current_status": "in_stock",
-  "last_checked": "2026-11-13T01:10:18+08:00",
+  "last_checked": "2026-11-13T01:26:31+08:00",
   "alerted": true,
   "consecutive_errors": 0,
   "product_url": "https://www.finders.com.tw/products/owala-sway-30oz-golf",
   "history": [
+    {
+      "time": "2026-11-13T01:26:31+08:00",
+      "status": "in_stock"
+    },
     {
       "time": "2026-11-13T01:10:18+08:00",
       "status": "in_stock"
@@ -1640,13 +1644,13 @@
   ],
   "product": {
     "title": "Owala® FreeSip Sway 【高爾夫球】特別款",
-    "image": "https://img.shoplineapp.com/media/image_clips/6ae40a1b961cb10e35a2369b/original.jpg?1793329691=&amp;owner_id=620b0e6bf267390031086ddc",
+    "image": "https://img.shoplineapp.com/media/image_clips/6ae40a1b961cb10e35a2369b/original.jpg?1793329691=&owner_id=620b0e6bf267390031086ddc",
     "price": 1450,
     "currency": "TWD"
   },
   "stats": {
-    "total_checks": 405,
-    "in_stock_checks": 1,
+    "total_checks": 406,
+    "in_stock_checks": 2,
     "in_stock_events": 1,
     "status_since": "2026-11-13T01:10:18+08:00",
     "last_in_stock_start": "2026-11-13T01:10:18+08:00",
@@ -1655,19 +1659,27 @@
   "variants": [
     {
       "name": "高爾夫球【螢光黃】",
-      "in_stock": false
+      "in_stock": false,
+      "image": "https://rylyn-n.github.io/owala-stock-monitor/images/yellow.jpg"
     },
     {
       "name": "高爾夫球【營光桃紅】",
-      "in_stock": false
+      "in_stock": false,
+      "image": "https://rylyn-n.github.io/owala-stock-monitor/images/pink.jpg"
     },
     {
       "name": "高爾夫球【白】",
-      "in_stock": true
+      "in_stock": true,
+      "image": "https://rylyn-n.github.io/owala-stock-monitor/images/white.jpg"
     },
     {
       "name": "高爾夫球【黑】",
-      "in_stock": true
+      "in_stock": true,
+      "image": "https://rylyn-n.github.io/owala-stock-monitor/images/black.jpg"
     }
+  ],
+  "notified_variants": [
+    "高爾夫球【白】",
+    "高爾夫球【黑】"
   ]
 }
