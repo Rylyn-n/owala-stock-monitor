@@ -1,10 +1,14 @@
 {
-  "current_status": "sold_out",
-  "last_checked": "2026-11-12T18:11:41+08:00",
-  "alerted": false,
+  "current_status": "in_stock",
+  "last_checked": "2026-11-13T01:10:18+08:00",
+  "alerted": true,
   "consecutive_errors": 0,
   "product_url": "https://www.finders.com.tw/products/owala-sway-30oz-golf",
   "history": [
+    {
+      "time": "2026-11-13T01:10:18+08:00",
+      "status": "in_stock"
+    },
     {
       "time": "2026-11-12T18:11:41+08:00",
       "status": "sold_out"
@@ -1641,11 +1645,29 @@
     "currency": "TWD"
   },
   "stats": {
-    "total_checks": 404,
-    "in_stock_checks": 0,
-    "in_stock_events": 0,
-    "status_since": "2026-09-02T03:45:24+08:00",
-    "last_in_stock_start": null,
+    "total_checks": 405,
+    "in_stock_checks": 1,
+    "in_stock_events": 1,
+    "status_since": "2026-11-13T01:10:18+08:00",
+    "last_in_stock_start": "2026-11-13T01:10:18+08:00",
     "last_in_stock_end": null
-  }
+  },
+  "variants": [
+    {
+      "name": "高爾夫球【螢光黃】",
+      "in_stock": false
+    },
+    {
+      "name": "高爾夫球【營光桃紅】",
+      "in_stock": false
+    },
+    {
+      "name": "高爾夫球【白】",
+      "in_stock": true
+    },
+    {
+      "name": "高爾夫球【黑】",
+      "in_stock": true
+    }
+  ]
 }
