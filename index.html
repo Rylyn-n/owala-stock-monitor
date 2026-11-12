@@ -69,6 +69,30 @@
   @keyframes beat{0%,100%{opacity:1}50%{opacity:.25}}
   @media (prefers-reduced-motion:reduce){.pulse i{animation:none}}
 
+  /* 各款式 */
+  .variants{
+    display:grid;grid-template-columns:repeat(auto-fill,minmax(11rem,1fr));
+    gap:.75rem;margin:0 0 2rem;
+  }
+  .variants[hidden]{display:none}
+  .vcard{
+    display:flex;flex-direction:column;background:var(--surface);
+    border:1px solid var(--rule);border-radius:.5rem;overflow:hidden;
+    box-shadow:var(--shadow);color:inherit;text-decoration:none;
+    transition:border-color .2s ease;
+  }
+  .vcard:hover,.vcard:focus-visible{border-color:var(--water)}
+  .vcard img{width:100%;aspect-ratio:1;object-fit:cover;display:block;background:var(--bg)}
+  .vcard.out img{filter:grayscale(.85);opacity:.55}
+  .vcard .vbody{padding:.75rem .875rem .875rem;display:flex;flex-direction:column;gap:.375rem}
+  .vcard .vname{font-size:.875rem;font-weight:500;line-height:1.4}
+  .badge{
+    align-self:flex-start;font-size:.75rem;font-weight:700;
+    padding:.125rem .625rem;border-radius:999px;
+  }
+  .badge.in{background:var(--water);color:var(--bg)}
+  .badge.out{background:transparent;color:var(--dim);border:1px solid var(--rule)}
+
   /* 統計 */
   .stats{
     display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));
@@ -117,6 +141,8 @@
       <p class="since" id="since">正在載入監測資料。</p>
     </div>
   </div>
+
+  <div class="variants" id="variants" hidden></div>
 
   <div class="pulse"><i></i><span id="pulse-text">每 10 分鐘自動檢查一次</span></div>
 
@@ -247,6 +273,26 @@ function render(data){
     const el = document.getElementById("price");
     el.innerHTML = `NT$ ${Number(p.price).toLocaleString()}<small>${p.currency || "TWD"}</small>`;
     el.hidden = false;
+  }
+
+  /* 各款式 */
+  const vs = data.variants || [];
+  const vbox = document.getElementById("variants");
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  if (vs.length){
+    const url = data.product_url || "#";
+    vbox.innerHTML = vs.map(x => {
+      const img = x.image || p.image;
+      return `<a class="vcard ${x.in_stock ? "in" : "out"}" href="${esc(url)}" target="_blank" rel="noopener">
+        ${img ? `<img src="${esc(img)}" alt="${esc(x.name)}" loading="lazy">` : ""}
+        <div class="vbody">
+          <span class="vname">${esc(x.name)}</span>
+          <span class="badge ${x.in_stock ? "in" : "out"}">${x.in_stock ? "有貨" : "售完"}</span>
+        </div></a>`;
+    }).join("");
+    vbox.hidden = false;
+    const n = vs.filter(x => x.in_stock).length;
+    document.getElementById("pulse-text").textContent = `${vs.length} 款中 ${n} 款有貨・每 10 分鐘自動檢查一次`;
   }
 
   const v = document.getElementById("verdict");

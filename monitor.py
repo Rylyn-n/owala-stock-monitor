@@ -22,6 +22,7 @@ import os
 import sys
 import json
 import re
+import html as htmllib
 from datetime import datetime, timezone, timedelta
 
 import requests
@@ -91,10 +92,8 @@ def extract_product(html):
     if title:
         info["title"] = title
 
-    image = meta_content(html, "og:image")
+    image = clean_url(meta_content(html, "og:image"))
     if image:
-        if image.startswith("//"):
-            image = "https:" + image
         info["image"] = image
 
     price = meta_content(html, "product:price:amount")
@@ -167,6 +166,60 @@ def variant_name(v, idx):
     return " / ".join(parts) or v.get("sku") or f"款式 {idx + 1}"
 
 
+IMG_KEYS = ("media", "image", "images", "featured_image", "variant_media",
+            "image_url", "original", "url", "src")
+
+
+def clean_url(u):
+    if not isinstance(u, str) or not u:
+        return None
+    u = htmllib.unescape(u.strip())
+    if u.startswith("//"):
+        u = "https:" + u
+    if u.startswith("http://"):
+        u = "https://" + u[7:]          # LINE 只接受 https 圖片
+    return u if u.startswith("https://") else None
+
+
+def find_image(obj, depth=0):
+    """在款式資料裡找第一個圖片網址（SHOPLINE 通常在 media.images.original.url）。"""
+    if depth > 5 or obj is None:
+        return None
+    if isinstance(obj, str):
+        u = clean_url(obj)
+        if u and (re.search(r"\.(jpe?g|png|webp|gif)(\?|$)", u, re.I) or "img.shoplineapp.com" in u):
+            return u
+        return None
+    if isinstance(obj, list):
+        for x in obj:
+            u = find_image(x, depth + 1)
+            if u:
+                return u
+        return None
+    if isinstance(obj, dict):
+        # 優先找原圖
+        for k in ("original", "large", "url", "src"):
+            if k in obj:
+                u = find_image(obj[k], depth + 1)
+                if u:
+                    return u
+        for k in IMG_KEYS:
+            if k in obj:
+                u = find_image(obj[k], depth + 1)
+                if u:
+                    return u
+    return None
+
+
+def variant_image(v):
+    for k in ("media", "image", "images", "featured_image", "variant_media", "image_url"):
+        if k in v:
+            u = find_image(v[k])
+            if u:
+                return u
+    return None
+
+
 def variant_in_stock(v):
     """True/False；看不到任何庫存欄位回傳 None。"""
     if v.get("unlimited_quantity") is True:
@@ -195,7 +248,11 @@ def variants_from_product(p):
             continue
         s = variant_in_stock(v)
         if s is not None:
-            out.append({"name": variant_name(v, i), "in_stock": s})
+            item = {"name": variant_name(v, i), "in_stock": s}
+            img = variant_image(v)
+            if img:
+                item["image"] = img
+            out.append(item)
     if out:
         return out
     # 沒有款式的單一商品：直接看商品本身
@@ -297,8 +354,12 @@ def check_via_jsonld(html):
                     continue
                 av = str(o["availability"])
                 name = o.get("name") or o.get("sku") or it.get("name") or f"款式 {i + 1}"
-                out.append({"name": str(name),
-                            "in_stock": ("InStock" in av or "PreOrder" in av or "LimitedAvailability" in av)})
+                item = {"name": str(name),
+                        "in_stock": ("InStock" in av or "PreOrder" in av or "LimitedAvailability" in av)}
+                img = find_image(o.get("image"))
+                if img:
+                    item["image"] = img
+                out.append(item)
     if out:
         log(f"JSON-LD 找到 {len(out)} 個款式")
         return out
@@ -340,61 +401,78 @@ def summarize(variants):
             log(f"WATCH_VARIANTS={WATCH_VARIANTS} 沒對到任何款式，改看全部")
             watched = variants
     for v in variants:
-        log(f"  {'✓ 有貨' if v['in_stock'] else '✗ 售完'}  {v['name']}")
-    names = [v["name"] for v in watched if v["in_stock"]]
-    return bool(names), names
+        log(f"  {'✓ 有貨' if v['in_stock'] else '✗ 售完'}  {v['name']}"
+            f"  {'(有款式圖)' if v.get('image') else '(無款式圖，用商品主圖)'}")
+    in_stock = [v for v in watched if v["in_stock"]]
+    return bool(in_stock), in_stock
 
 
 # ---------------------------------------------------------------- LINE
 
-def send_line(text):
+def push_line(messages):
     if not LINE_TOKEN or not LINE_TO:
         log("缺少 LINE_CHANNEL_ACCESS_TOKEN 或 LINE_TO，略過通知")
         return False
-
-    payload = {
-        "to": LINE_TO,
-        "messages": [{
-            "type": "flex",
-            "altText": text,
-            "contents": {
-                "type": "bubble",
-                "body": {
-                    "type": "box", "layout": "vertical", "spacing": "md",
-                    "contents": [
-                        {"type": "text", "text": "補貨了", "weight": "bold",
-                         "size": "xl", "color": "#1F7A5A"},
-                        {"type": "text", "text": text, "wrap": True, "size": "sm"},
-                        {"type": "text", "text": now_iso(), "size": "xs",
-                         "color": "#999999"},
-                    ],
-                },
-                "footer": {
-                    "type": "box", "layout": "vertical",
-                    "contents": [{
-                        "type": "button", "style": "primary", "color": "#1F7A5A",
-                        "action": {"type": "uri", "label": "前往商品頁",
-                                   "uri": PRODUCT_URL},
-                    }],
-                },
-            },
-        }],
-    }
-
     try:
         r = requests.post(
             "https://api.line.me/v2/bot/message/push",
             headers={"Authorization": f"Bearer {LINE_TOKEN}",
                      "Content-Type": "application/json"},
-            json=payload, timeout=REQUEST_TIMEOUT,
+            json={"to": LINE_TO, "messages": messages}, timeout=REQUEST_TIMEOUT,
         )
         if r.status_code == 200:
             log("LINE 通知已送出")
             return True
-        log(f"LINE 通知失敗 {r.status_code}: {r.text[:200]}")
+        log(f"LINE 通知失敗 {r.status_code}: {r.text[:300]}")
     except Exception as e:
         log(f"LINE 通知發送例外：{type(e).__name__}: {e}")
     return False
+
+
+def send_line(text):
+    """純文字通知（錯誤警告用）。"""
+    return push_line([{"type": "text", "text": text}])
+
+
+def restock_bubble(variant, fallback_image, price=None):
+    body = [
+        {"type": "text", "text": "補貨了", "weight": "bold", "size": "xl", "color": "#1F7A5A"},
+        {"type": "text", "text": variant["name"], "wrap": True, "size": "md", "weight": "bold"},
+    ]
+    if price:
+        body.append({"type": "text", "text": f"NT$ {price:,}" if isinstance(price, int) else f"NT$ {price}",
+                     "size": "sm", "color": "#555555"})
+    body.append({"type": "text", "text": now_iso(), "size": "xs", "color": "#999999"})
+    bubble = {
+        "type": "bubble",
+        "body": {"type": "box", "layout": "vertical", "spacing": "sm", "contents": body},
+        "footer": {
+            "type": "box", "layout": "vertical",
+            "contents": [{
+                "type": "button", "style": "primary", "color": "#1F7A5A",
+                "action": {"type": "uri", "label": "前往商品頁", "uri": PRODUCT_URL},
+            }],
+        },
+    }
+    img = variant.get("image") or fallback_image
+    if img and len(img) <= 2000:
+        bubble["hero"] = {"type": "image", "url": img, "size": "full",
+                          "aspectRatio": "1:1", "aspectMode": "cover",
+                          "action": {"type": "uri", "uri": PRODUCT_URL}}
+    return bubble
+
+
+def send_restock(variants, product):
+    """每個補貨的款式一張卡片，多款時變成可左右滑的輪播。"""
+    names = "、".join(v["name"] for v in variants)
+    alt = f"Owala 補貨了：{names}"[:400]
+    bubbles = [restock_bubble(v, product.get("image"), product.get("price")) for v in variants[:12]]
+    contents = bubbles[0] if len(bubbles) == 1 else {"type": "carousel", "contents": bubbles}
+    ok = push_line([{"type": "flex", "altText": alt, "contents": contents}])
+    if not ok:
+        # 圖片網址有問題時 LINE 會整則拒收，退回純文字至少確保收得到
+        ok = send_line(alt + "\n" + PRODUCT_URL)
+    return ok
 
 
 # ---------------------------------------------------------------- 狀態
@@ -450,7 +528,10 @@ def main():
 
     html = fetch_html(PRODUCT_URL)
     variants = None
-    in_stock_names = []
+    in_stock_list = []
+    # 已經通知過、而且到現在都還有貨的款式。第一次跑新版時沿用上次的有貨清單，避免重複通知。
+    notified = set(state.get("notified_variants")
+                   or [v["name"] for v in state.get("variants", []) if v.get("in_stock")])
 
     try:
         variants = (check_via_embedded(html)
@@ -460,7 +541,7 @@ def main():
             # 注意：「貨到通知我」「售完」這些字是 SHOPLINE 頁面模板裡固定就有的，
             # 不論有沒有貨都會出現，所以不能拿來判斷，直接當成錯誤處理。
             raise RuntimeError("找不到任何款式庫存資料，可能是頁面結構改了")
-        result, in_stock_names = summarize(variants)
+        result, in_stock_list = summarize(variants)
         status = "in_stock" if result else "sold_out"
         state["consecutive_errors"] = 0
     except Exception as e:
@@ -470,9 +551,6 @@ def main():
         if state["consecutive_errors"] == 6:
             send_line("庫存監控連續失敗多次，可能是頁面結構改了或被擋，請確認。")
 
-    if variants:
-        state["variants"] = variants
-
     log(f"上次：{prev} → 這次：{status}")
     ts = now_iso()
 
@@ -481,13 +559,22 @@ def main():
     if info:
         state["product"] = {**state.get("product", {}), **info}
 
-    # 通知：只在「售完 → 有貨」的轉折發一次
-    if status == "in_stock" and not state.get("alerted", False):
-        msg = "Owala Sway 30oz 高爾夫球款有貨了：" + "、".join(in_stock_names)
-        if send_line(msg):
-            state["alerted"] = True
+    # 通知：只針對「這次才變成有貨」的款式發一次。
+    # 例如白、黑已經有貨，之後螢光黃也補貨 → 只通知螢光黃。
+    if status == "in_stock":
+        newly = [v for v in in_stock_list if v["name"] not in notified]
+        if newly:
+            log(f"新補貨款式：{'、'.join(v['name'] for v in newly)}")
+            if send_restock(newly, state.get("product", {})):
+                state["alerted"] = True
+                notified |= {v["name"] for v in newly}
+            # 發送失敗就不記成已通知，下次檢查會再試
     elif status == "sold_out":
         state["alerted"] = False
+    if variants:
+        # 賣完的款式移出已通知清單，下次補貨才會再通知
+        notified &= {v["name"] for v in in_stock_list}
+        state["notified_variants"] = sorted(notified)
 
     # 累計統計
     if status != "error":
@@ -507,6 +594,9 @@ def main():
             stats["status_since"] = ts
 
         state["current_status"] = status
+
+    if variants:
+        state["variants"] = variants
 
     state["last_checked"] = ts
     state["product_url"] = PRODUCT_URL
