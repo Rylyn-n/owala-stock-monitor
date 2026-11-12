@@ -211,6 +211,25 @@ def find_image(obj, depth=0):
     return None
 
 
+# 各款式的圖片：放在 repo 的 images/ 資料夾，透過 GitHub Pages 提供網址。
+# 款式名稱裡出現左邊的關鍵字，就用右邊的圖（由上往下比對，先對到的優先）。
+PAGES_URL = os.environ.get("PAGES_URL", "https://rylyn-n.github.io/owala-stock-monitor/").rstrip("/") + "/"
+VARIANT_IMAGES = [
+    ("桃紅", "images/pink.jpg"),
+    ("粉",   "images/pink.jpg"),
+    ("黃",   "images/yellow.jpg"),
+    ("黑",   "images/black.jpg"),
+    ("白",   "images/white.jpg"),
+]
+
+
+def custom_image(name):
+    for key, path in VARIANT_IMAGES:
+        if key in name:
+            return PAGES_URL + path
+    return None
+
+
 def variant_image(v):
     for k in ("media", "image", "images", "featured_image", "variant_media", "image_url"):
         if k in v:
@@ -249,7 +268,7 @@ def variants_from_product(p):
         s = variant_in_stock(v)
         if s is not None:
             item = {"name": variant_name(v, i), "in_stock": s}
-            img = variant_image(v)
+            img = custom_image(item["name"]) or variant_image(v)
             if img:
                 item["image"] = img
             out.append(item)
@@ -356,7 +375,7 @@ def check_via_jsonld(html):
                 name = o.get("name") or o.get("sku") or it.get("name") or f"款式 {i + 1}"
                 item = {"name": str(name),
                         "in_stock": ("InStock" in av or "PreOrder" in av or "LimitedAvailability" in av)}
-                img = find_image(o.get("image"))
+                img = custom_image(item["name"]) or find_image(o.get("image"))
                 if img:
                     item["image"] = img
                 out.append(item)
@@ -402,7 +421,7 @@ def summarize(variants):
             watched = variants
     for v in variants:
         log(f"  {'✓ 有貨' if v['in_stock'] else '✗ 售完'}  {v['name']}"
-            f"  {'(有款式圖)' if v.get('image') else '(無款式圖，用商品主圖)'}")
+            f"  {v.get('image') or '(無款式圖，用商品主圖)'}")
     in_stock = [v for v in watched if v["in_stock"]]
     return bool(in_stock), in_stock
 
