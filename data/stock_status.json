@@ -1,10 +1,14 @@
 {
   "current_status": "in_stock",
-  "last_checked": "2026-11-27T13:07:31+08:00",
+  "last_checked": "2026-11-27T22:59:15+08:00",
   "alerted": true,
   "consecutive_errors": 0,
   "product_url": "https://www.finders.com.tw/products/owala-sway-30oz-golf",
   "history": [
+    {
+      "time": "2026-11-27T22:59:15+08:00",
+      "status": "in_stock"
+    },
     {
       "time": "2026-11-27T13:07:31+08:00",
       "status": "in_stock"
@@ -1849,8 +1853,8 @@
     "currency": "TWD"
   },
   "stats": {
-    "total_checks": 456,
-    "in_stock_checks": 52,
+    "total_checks": 457,
+    "in_stock_checks": 53,
     "in_stock_events": 1,
     "status_since": "2026-11-13T01:10:18+08:00",
     "last_in_stock_start": "2026-11-13T01:10:18+08:00",
